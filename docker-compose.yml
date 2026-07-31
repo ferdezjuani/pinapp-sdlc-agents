@@ -1,0 +1,12 @@
+services:
+  orchestrator:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ../target-repo-ecommerce:/target-repo-ecommerce
+    env_file:
+      - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp_credentials.json

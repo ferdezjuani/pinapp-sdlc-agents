@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# GCP Credentials
+gcp_credentials.json
+*.json.key
+
+# ChromaDB
+chroma_db/
+.chroma/
+
+# Mac OS
+.DS_Store
