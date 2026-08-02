@@ -10,7 +10,7 @@ from langchain_classic.chains.combine_documents import create_stuff_documents_ch
 from langchain_core.prompts import ChatPromptTemplate
 
 class KnowledgeAgent:
-    def __init__(self, repo_path: str, persist_directory: str = "./chroma_db"):
+    def __init__(self, repo_path: str, persist_directory: str = None):
         self.repo_path = repo_path
         self.persist_directory = persist_directory
         
@@ -21,7 +21,7 @@ class KnowledgeAgent:
         self.vector_store = None
         
         # Try to load existing vector store, otherwise it stays None until index_repo is called
-        if os.path.exists(self.persist_directory):
+        if self.persist_directory and os.path.exists(self.persist_directory):
             self.vector_store = Chroma(
                 persist_directory=self.persist_directory, 
                 embedding_function=self.embeddings
@@ -31,8 +31,8 @@ class KnowledgeAgent:
         """Loads all JS/TS/MD files from the target repo, chunks them, and stores in ChromaDB."""
         print(f"Indexing repository at {self.repo_path}...")
         
-        # Wipe previous ChromaDB to avoid stale context
-        if os.path.exists(self.persist_directory):
+        # Wipe previous ChromaDB to avoid stale context if using persistence
+        if self.persist_directory and os.path.exists(self.persist_directory):
             shutil.rmtree(self.persist_directory, ignore_errors=True)
             self.vector_store = None
         
@@ -58,7 +58,7 @@ class KnowledgeAgent:
         )
         splits = text_splitter.split_documents(docs)
         
-        # Create Vector Store
+        # Create Vector Store (In-memory if persist_directory is None)
         self.vector_store = Chroma.from_documents(
             documents=splits, 
             embedding=self.embeddings, 

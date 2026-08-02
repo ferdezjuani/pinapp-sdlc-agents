@@ -91,11 +91,13 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks):
         # Extraer variables para el status check
         repo_full_name = payload["repository"]["full_name"]
         head_sha = pr["head"]["sha"]
+        pr_number = pr["number"]
+        installation_id = payload.get("installation", {}).get("id")
         
         print(f"PROCESANDO PR: url={pr_api_url} repo={repo_full_name} sha={head_sha}", flush=True)
         
         # Procesamos en background para no bloquear el Webhook de GitHub (tiene timeout corto)
-        background_tasks.add_task(process_github_pr, pr_api_url, comments_url, repo_full_name, head_sha)
+        background_tasks.add_task(process_github_pr, pr_api_url, comments_url, repo_full_name, head_sha, pr_number, installation_id)
         return {"status": "processing", "message": "PR review triggered in background"}
         
     print(f"IGNORANDO WEBHOOK. payload_keys={list(payload.keys())}", flush=True)
@@ -116,11 +118,44 @@ def set_commit_status(repo_full_name: str, sha: str, state: str, description: st
     data = {
         "state": state,
         "description": description[:140], # Max 140 chars
-        "context": "Gemini SDLC Agent"
+        "context": "Piny SDLC Agent"
     }
     requests.post(url, headers=headers, json=data)
 
-def process_github_pr(pr_api_url: str, comments_url: str, repo_full_name: str, head_sha: str):
+def get_github_installation_token(app_id: str, private_key_path: str, installation_id: int) -> str:
+    import time
+    import jwt
+    import requests
+    
+    try:
+        with open(private_key_path, 'r') as f:
+            private_key = f.read()
+            
+        payload = {
+            'iat': int(time.time()),
+            'exp': int(time.time()) + (10 * 60),
+            'iss': app_id
+        }
+        
+        encoded_jwt = jwt.encode(payload, private_key, algorithm='RS256')
+        
+        url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
+        headers = {
+            "Authorization": f"Bearer {encoded_jwt}",
+            "Accept": "application/vnd.github.v3+json"
+        }
+        
+        response = requests.post(url, headers=headers)
+        if response.status_code == 201:
+            return response.json().get("token")
+        else:
+            print(f"Failed to get installation token: {response.text}", flush=True)
+            return None
+    except Exception as e:
+        print(f"Error generating JWT: {e}", flush=True)
+        return None
+
+def process_github_pr(pr_api_url: str, comments_url: str, repo_full_name: str, head_sha: str, pr_number: int, installation_id: int):
     import requests
     from app.agents.reviewer_agent import ReviewerAgent
     import json
@@ -129,9 +164,20 @@ def process_github_pr(pr_api_url: str, comments_url: str, repo_full_name: str, h
     # Forzamos la carga del .env montado en el contenedor
     load_dotenv()
     
-    token = os.environ.get("GITHUB_TOKEN")
+    app_id = os.environ.get("GITHUB_APP_ID")
+    private_key_path = os.environ.get("GITHUB_APP_PRIVATE_KEY_PATH")
+    
+    print(f"[DEBUG] app_id={app_id}, private_key_path={private_key_path}, installation_id={installation_id}", flush=True)
+    
+    if app_id and private_key_path and installation_id:
+        print("Autenticando como GitHub App...", flush=True)
+        token = get_github_installation_token(app_id, private_key_path, installation_id)
+    else:
+        print("Autenticando con GITHUB_TOKEN clásico...", flush=True)
+        token = os.environ.get("GITHUB_TOKEN")
+        
     if not token:
-        print("ERROR: GITHUB_TOKEN no está configurado en .env", flush=True)
+        print("ERROR: No se pudo obtener un token de autenticación (Ni de App ni PAT)", flush=True)
         return
         
     headers = {
@@ -175,7 +221,35 @@ def process_github_pr(pr_api_url: str, comments_url: str, repo_full_name: str, h
     agent = ReviewerAgent()
     review = agent.review_code(diff_content, business_context)
     
-    # 3. Formatear la respuesta como comentario de Markdown
+    # 3. Procesar problemas e intentar publicar comentarios inline
+    issues = review.get("issues", [])
+    general_issues = []
+    
+    if issues:
+        print(f"Procesando {len(issues)} issues encontrados por Gemini...", flush=True)
+        for issue in issues:
+            file_path = issue.get("file_path")
+            line_number = issue.get("line_number")
+            desc = issue.get("description")
+            
+            if file_path and line_number:
+                review_url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}/comments"
+                inline_payload = {
+                    "body": f"🤖 **Gemini AI:** {desc}",
+                    "commit_id": head_sha,
+                    "path": file_path,
+                    "line": int(line_number)
+                }
+                res = requests.post(review_url, headers=headers, json=inline_payload)
+                if res.status_code == 201:
+                    print(f"Comentario inline publicado en {file_path}:{line_number}", flush=True)
+                else:
+                    print(f"Fallo al publicar comentario inline (Probablemente línea no modificada en PR): {res.status_code}", flush=True)
+                    general_issues.append(issue)
+            else:
+                general_issues.append(issue)
+
+    # 4. Formatear el comentario general de Markdown
     comment_body = f"## 🤖 Gemini AI Code Review\n\n"
     
     risk_level = review.get('risk_level', 'UNKNOWN').upper()
@@ -184,22 +258,23 @@ def process_github_pr(pr_api_url: str, comments_url: str, repo_full_name: str, h
     
     comment_body += f"### Análisis\n{review.get('analysis', '')}\n\n"
     
-    issues = review.get("issues", [])
-    if issues:
-        comment_body += "### 🚨 Problemas Detectados\n"
-        for issue in issues:
-            comment_body += f"- **Línea {issue.get('line_number', '?')}**: {issue.get('description', '')}\n"
-    else:
+    if general_issues:
+        comment_body += "### 🚨 Problemas Adicionales\n"
+        for issue in general_issues:
+            file_str = f"`{issue.get('file_path')}` " if issue.get('file_path') else ""
+            line_str = f"Línea {issue.get('line_number', '?')}"
+            comment_body += f"- **{file_str}{line_str}**: {issue.get('description', '')}\n"
+    elif not issues:
         comment_body += "### ✨ Todo se ve excelente\nNo se detectaron problemas de seguridad o lógica.\n"
         
-    # 4. Postear comentario en GitHub
-    print(f"Posteando comentario en {comments_url}...", flush=True)
+    # 5. Postear comentario general en GitHub
+    print(f"Posteando comentario general en {comments_url}...", flush=True)
     post_res = requests.post(comments_url, headers=headers, json={"body": comment_body})
     
     if post_res.status_code == 201:
-        print("¡Comentario posteado exitosamente!", flush=True)
+        print("¡Comentario general posteado exitosamente!", flush=True)
     else:
-        print(f"Error al postear comentario: {post_res.status_code} - {post_res.text}", flush=True)
+        print(f"Error al postear comentario general: {post_res.status_code} - {post_res.text}", flush=True)
         
     # Reportamos el estado final a GitHub
     if risk_level == "HIGH":

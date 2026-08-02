@@ -36,7 +36,7 @@ class ReviewerAgent:
 
         system_instruction = base_instruction + (
             "Output your final response STRICTLY in valid JSON format matching the following schema: "
-            "{\"risk_level\": \"LOW|MEDIUM|HIGH\", \"analysis\": \"Detailed explanation of the findings\", \"issues\": [{\"line_number\": \"12\", \"description\": \"explanation of the issue\"}]}"
+            "{\"risk_level\": \"LOW|MEDIUM|HIGH\", \"analysis\": \"Detailed explanation of the findings\", \"issues\": [{\"file_path\": \"src/pages/api/checkout.js\", \"line_number\": 12, \"description\": \"explanation of the issue\"}]}"
         )
         
         prompt = f"Please review the following code changes:\n\n{diff_content}"

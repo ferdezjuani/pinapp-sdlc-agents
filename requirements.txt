@@ -9,3 +9,5 @@ chromadb
 pydantic
 python-dotenv
 requests
+PyJWT
+cryptography
