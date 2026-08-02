@@ -1,67 +1,65 @@
-# PinApp SDLC AI Orchestrator
+# Piny SDLC Agent Orchestrator
 
-This repository contains the functional prototype for the **Multi-Agent SDLC Orchestrator**, developed for the PinApp technical challenge. 
+Un orquestador de agentes de IA diseñado para integrarse directamente en el ciclo de vida de desarrollo de software (SDLC) de proyectos de e-commerce.
 
-It aims to solve common frictions in an e-commerce development team by providing two core AI capabilities:
-1. **Code Review Agent:** Analyzes Pull Request diffs to detect security vulnerabilities, logic bugs, and suggest architecture improvements.
-2. **Knowledge Agent (RAG):** Indexes a target repository and answers technical questions regarding the codebase to speed up onboarding and development.
+Este sistema implementa dos capacidades fundamentales para acelerar el desarrollo:
+1. **Automated Code Review Agent**: Un agente que revisa automáticamente los Pull Requests en busca de vulnerabilidades, deudas técnicas y asegura el cumplimiento de las reglas de negocio, comentando directamente línea por línea en GitHub.
+2. **Agentic Knowledge Base (RAG)**: Un agente consultor que indexa el código fuente y las guías del proyecto para responder preguntas de arquitectura y negocio en tiempo real.
 
-## Tech Stack
-* **Python 3.10**
-* **FastAPI** (Orchestrator Router)
-* **Google GenAI / Vertex AI** (Gemini 1.5 Pro & Flash)
-* **LangChain & ChromaDB** (Vector Store for RAG)
-* **Docker** (Operability)
+Este proyecto ha sido desarrollado como respuesta al Reto Técnico de PinApp. Para leer el racional detrás de las decisiones arquitectónicas, revisa el archivo [ARCHITECTURE_AND_DECISIONS.md](./ARCHITECTURE_AND_DECISIONS.md).
 
-## Prerequisites
-To run this project, you need:
-* Docker & Docker Compose installed.
-* A Google Cloud account with Vertex AI enabled OR a Gemini API Key.
+## Requisitos Previos
+- Docker y Docker Compose
+- Una cuenta de Google Cloud con permisos para usar Vertex AI (Gemini / Text Embeddings)
+- Una GitHub App configurada e instalada en tu repositorio (para probar los PRs)
 
-## Setup & Execution (3 Steps)
+## Estructura del Proyecto
+- `/app`: El código fuente del orquestador en FastAPI y la definición de los agentes de Langchain.
+- `/example-ecommerce`: Un repositorio simulado de e-commerce sobre el cual operan los agentes (Código Base).
 
-### 1. Clone the repository
-```bash
-git clone <tu-repositorio>
-cd pinapp-sdlc-agents
+## Configuración y Ejecución
+
+### 1. Variables de Entorno
+Crea un archivo `.env` en la raíz de este proyecto con la siguiente estructura:
+
+```env
+# Credenciales GCP (Vertex AI)
+GOOGLE_APPLICATION_CREDENTIALS=/app/gcp_credentials.json
+
+# Autenticación GitHub App (Piny)
+GITHUB_APP_ID=tu_app_id
+GITHUB_APP_PRIVATE_KEY_PATH=/app/tu-llave.pem
 ```
 
-### 2. Configure Credentials
-Create a `.env` file in the root of the project with your Google API Key:
-```bash
-echo "GOOGLE_API_KEY=your_api_key_here" > .env
-```
-*(Alternatively, you can authenticate via `gcloud auth application-default login` if running locally without Docker).*
+*Importante: Asegúrate de colocar el archivo `gcp_credentials.json` y el archivo de tu llave privada `.pem` en la raíz de este repositorio. El `docker-compose` los montará automáticamente en la carpeta `/app` del contenedor.*
 
-### 3. Run the System
+### 2. Levantar el Sistema
+Una vez configurado el `.env`, simplemente corre:
 ```bash
 docker-compose up --build
 ```
-The FastAPI server will start at `http://localhost:8000`.
+El orquestador estará escuchando peticiones en `http://localhost:8000`.
 
-## Testing the Endpoints
-You can test the Orchestrator via POST requests. We have provided two sample scenarios.
+## ¿Cómo probarlo?
 
-### Scenario 1: Q&A (Knowledge Agent)
+### Capacidad 1: Q&A de Reglas de Negocio
+Con el servidor corriendo, puedes interrogar a la base de conocimiento usando el siguiente request (vía cURL o Postman):
+
 ```bash
-curl -X POST "http://localhost:8000/api/v1/orchestrate" \
+curl -X POST http://localhost:8000/api/v1/orchestrate \
 -H "Content-Type: application/json" \
 -d '{
-    "action_type": "qna",
-    "payload": {
-        "question": "¿Dónde y cómo se maneja la lógica del carrito de compras y qué vulnerabilidad tiene?"
-    }
+  "action_type": "qna",
+  "payload": {
+    "question": "¿Cuáles son las reglas de negocio de inventario y concurrencia para el checkout?"
+  }
 }'
 ```
+El agente leerá el código y los markdowns dentro de `/example-ecommerce` y generará la respuesta.
 
-### Scenario 2: Code Review (Reviewer Agent)
-```bash
-curl -X POST "http://localhost:8000/api/v1/orchestrate" \
--H "Content-Type: application/json" \
--d '{
-    "action_type": "code_review",
-    "payload": {
-        "diff_content": "+ const total = req.body.total; \n+ // Trusting frontend total\n+ res.status(200).json({ success: true });"
-    }
-}'
-```
+### Capacidad 2: Code Review Automatizado
+1. Expon tu puerto 8000 a internet (por ejemplo, usando `ngrok http 8000`).
+2. Configura el Webhook URL en tu GitHub App para que apunte a `https://tu-url-ngrok.ngrok.app/webhook/github`.
+3. Haz un cambio en el código dentro de la carpeta `/example-ecommerce` (por ejemplo, creando una validación defectuosa en `checkout.js`).
+4. Sube los cambios y crea un Pull Request en tu repositorio asociado.
+5. Observa cómo "Piny SDLC Agent" comienza su validación ("Pending") y al cabo de unos segundos deja sus comentarios inline y un reporte general ("Success" o "Failure").

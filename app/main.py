@@ -57,7 +57,7 @@ async def orchestrate(request: OrchestratorRequest):
     elif request.action_type == "qna":
         from app.agents.knowledge_agent import KnowledgeAgent
         # Assuming the target repo is parallel to this project folder
-        agent = KnowledgeAgent(repo_path="../target-repo-ecommerce")
+        agent = KnowledgeAgent(repo_path="/target-repo-ecommerce")
         
         # If vector store is not initialized, try to index it (for prototype simplicity)
         if agent.vector_store is None:
@@ -118,7 +118,7 @@ def set_commit_status(repo_full_name: str, sha: str, state: str, description: st
     data = {
         "state": state,
         "description": description[:140], # Max 140 chars
-        "context": "Piny SDLC Agent"
+        "context": "Security & Architecture Review"
     }
     requests.post(url, headers=headers, json=data)
 

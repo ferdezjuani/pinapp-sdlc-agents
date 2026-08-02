@@ -29,42 +29,60 @@ class KnowledgeAgent:
 
     def index_repo(self):
         """Loads all JS/TS/MD files from the target repo, chunks them, and stores in ChromaDB."""
-        print(f"Indexing repository at {self.repo_path}...")
+        print(f"Indexing repository at {self.repo_path}...", flush=True)
         
         # Wipe previous ChromaDB to avoid stale context if using persistence
         if self.persist_directory and os.path.exists(self.persist_directory):
             shutil.rmtree(self.persist_directory, ignore_errors=True)
             self.vector_store = None
         
-        # Load multiple file extensions
+        # Load multiple file extensions, explicitly ignoring node_modules
         docs = []
-        for ext in ["**/*.js", "**/*.ts", "**/*.md"]:
-            loader = DirectoryLoader(
-                self.repo_path, 
-                glob=ext, 
-                loader_cls=TextLoader,
-                show_progress=False
-            )
-            try:
-                docs.extend(loader.load())
-            except Exception as e:
-                print(f"Skipping {ext}: {e}")
+        for root, dirs, files in os.walk(self.repo_path):
+            # Modifying dirs in-place to skip scanning these directories
+            if 'node_modules' in dirs:
+                dirs.remove('node_modules')
+            if '.next' in dirs:
+                dirs.remove('.next')
+            if '.git' in dirs:
+                dirs.remove('.git')
+                
+            for file in files:
+                if file.endswith((".js", ".ts", ".md")):
+                    file_path = os.path.join(root, file)
+                    try:
+                        loader = TextLoader(file_path)
+                        docs.extend(loader.load())
+                    except Exception as e:
+                        pass # Ignore loading errors silently to keep logs clean
+        
+        print(f"Total documents loaded: {len(docs)}", flush=True)
         
         # Split text into chunks
+        print("Splitting documents...", flush=True)
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
             length_function=len
         )
         splits = text_splitter.split_documents(docs)
+        print(f"Total splits created: {len(splits)}", flush=True)
         
         # Create Vector Store (In-memory if persist_directory is None)
-        self.vector_store = Chroma.from_documents(
-            documents=splits, 
-            embedding=self.embeddings, 
+        self.vector_store = Chroma(
+            embedding_function=self.embeddings,
             persist_directory=self.persist_directory
         )
-        print(f"Indexed {len(splits)} chunks successfully.")
+        
+        # Add documents in batches to avoid Vertex AI 20000 tokens per request limit
+        batch_size = 20
+        print("Adding documents to ChromaDB...", flush=True)
+        for i in range(0, len(splits), batch_size):
+            print(f"Adding batch {i//batch_size + 1}/{(len(splits)-1)//batch_size + 1}...", flush=True)
+            batch = splits[i:i+batch_size]
+            self.vector_store.add_documents(batch)
+            
+        print(f"Indexed {len(splits)} chunks successfully in batches of {batch_size}.", flush=True)
 
     def answer_question(self, question: str) -> str:
         """Retrieves relevant context and answers the question using Gemini."""

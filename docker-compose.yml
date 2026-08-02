@@ -5,7 +5,7 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      - ../target-repo-ecommerce:/target-repo-ecommerce
+      - ./example-ecommerce:/target-repo-ecommerce
     env_file:
       - .env
     environment:
