@@ -250,13 +250,13 @@ def process_github_pr(pr_api_url: str, comments_url: str, repo_full_name: str, h
                 general_issues.append(issue)
 
     # 4. Formatear el comentario general de Markdown
-    comment_body = f"## 🤖 Gemini AI Code Review\n\n"
+    comment_body = f"## 🤖 Piny AI Code Review\n\n"
     
     risk_level = review.get('risk_level', 'UNKNOWN').upper()
     risk_emoji = "🔴" if risk_level == "HIGH" else "🟡" if risk_level == "MEDIUM" else "🟢"
-    comment_body += f"**Nivel de Riesgo:** {risk_emoji} {risk_level}\n\n"
+    comment_body += f"**Risk level:** {risk_emoji} {risk_level}\n\n"
     
-    comment_body += f"### Análisis\n{review.get('analysis', '')}\n\n"
+    comment_body += f"### Resume\n{review.get('analysis', '')}\n\n"
     
     if general_issues:
         comment_body += "### 🚨 Problemas Adicionales\n"
