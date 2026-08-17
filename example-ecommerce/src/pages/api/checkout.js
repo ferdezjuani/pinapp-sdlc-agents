@@ -3,29 +3,32 @@ export default async function handler(req, res) {
     return res.status(405).json({ message: 'Method Not Allowed' });
   }
 
-  const { productId, orderId } = req.body;
+  const { productId, orderId, isTrustedCustomer } = req.body;
 
   try {
-    // BAD PRACTICE: Reading stock, computing in memory, and updating without a lock
-    // This violates the race condition/overselling rule
-    const product = await dbMock.products.findById(productId);
+    // GOOD PRACTICE: Using atomic decrement to avoid race conditions (Complies with Rule 1)
+    const updatedProduct = await dbMock.products.atomicDecrement(productId, 1);
     
-    // DEFECTO INTENCIONAL: Se omite la validación estricta de stock para probar Piny
-    if (true || product.stock > 0) {
-      const newStock = product.stock - 1;
-      await dbMock.products.update({ id: productId, stock: newStock });
-      
-      // BAD PRACTICE: Skipping PAID state
-      // This violates the order state transition rule
-      const order = await dbMock.orders.findById(orderId);
-      if (order.status === 'PENDING') {
-        await dbMock.orders.update({ id: orderId, status: 'SHIPPED' });
-      }
-
-      return res.status(200).json({ success: true, message: 'Order processed and shipped!' });
-    } else {
+    if (!updatedProduct) {
       return res.status(400).json({ success: false, message: 'Out of stock' });
     }
+    
+    const order = await dbMock.orders.findById(orderId);
+    
+    if (order.status === 'PENDING') {
+      let nextStatus = 'PAID';
+      
+      // BAD PRACTICE: Skipping PAID state for trusted customers
+      // This violates the order state transition rule (Rule 2)
+      if (isTrustedCustomer) {
+        nextStatus = 'SHIPPED'; 
+      }
+      
+      await dbMock.orders.update({ id: orderId, status: nextStatus });
+    }
+
+    return res.status(200).json({ success: true, message: 'Order processed!' });
+
   } catch (error) {
     return res.status(500).json({ success: false, message: 'Internal Server Error' });
   }
@@ -34,8 +37,7 @@ export default async function handler(req, res) {
 // Mock DB for the example
 const dbMock = {
   products: {
-    findById: async (id) => ({ id, name: 'Limited Edition Sneakers', stock: 1 }),
-    update: async (data) => console.log('Product updated:', data)
+    atomicDecrement: async (id, amount) => ({ id, name: 'Limited Edition Sneakers', stock: 0 }),
   },
   orders: {
     findById: async (id) => ({ id, status: 'PENDING' }),
